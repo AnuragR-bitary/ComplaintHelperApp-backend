@@ -1,9 +1,10 @@
 const express = require('express');
 const Razorpay = require('razorpay');
 const router = express.Router();
-const Service = require('../models/service');
-const Complaint = require('../models/complaint');
-const Payment = require('../models/payment');
+const mongoose = require('mongoose');
+const complaintRepository = require('../repositories/complaint.repository');
+const serviceRepository = require('../repositories/service.repository');
+const paymentRepository = require('../repositories/payment.repository');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -19,12 +20,16 @@ router.post('/order', async (req, res) => {
     const { complaintId } = req.body;
     const userId = req.user.id;
 
-    // Verify the complaint exists and belongs to the user
-    const complaint = await Complaint.findOne({
-      _id: complaintId,
-      userId: userId,
-      status: 'pending_payment'
-    }).session(session);
+    // Verify the complaint exists and belongs to the user using repository
+    const complaint = await complaintRepository.findOne(
+      {
+        _id: complaintId,
+        userId: userId,
+        status: 'pending_payment'
+      },
+      [],
+      { session }
+    );
 
     if (!complaint) {
       await session.abortTransaction();
@@ -32,11 +37,15 @@ router.post('/order', async (req, res) => {
       return res.status(404).json({ error: 'Complaint not found or not eligible for payment' });
     }
 
-    // Get the service for this complaint
-    const service = await Service.findOne({ 
-      complaintId: complaint._id,
-      paymentStatus: 'unpaid'
-    }).session(session);
+    // Get the service for this complaint using repository
+    const service = await serviceRepository.findOne(
+      { 
+        complaintId: complaint._id,
+        paymentStatus: 'unpaid'
+      },
+      [],
+      { session }
+    );
 
     if (!service) {
       await session.abortTransaction();
@@ -52,21 +61,23 @@ router.post('/order', async (req, res) => {
       payment_capture: 1 // Auto-capture payment
     });
 
-    // Create payment record
-    const payment = new Payment({
-      serviceId: service._id,
-      razorpayOrderId: order.id,
-      razorpayPaymentId: '', // Will be updated after payment
-      razorpaySignature: '', // Will be updated after payment
-      amount: service.price,
-      status: 'initiated'
-    });
-    
-    await payment.save({ session });
+    // Create payment record using repository
+    const payment = await paymentRepository.create(
+      {
+        serviceId: service._id,
+        razorpayOrderId: order.id,
+        amount: order.amount / 100, // Convert back to rupees
+        status: 'initiated'
+      },
+      { session }
+    );
 
-    // Update service with payment reference
-    service.paymentId = payment._id;
-    await service.save({ session });
+    // Update service with payment ID using repository
+    await serviceRepository.update(
+      service._id,
+      { paymentId: payment._id },
+      { session }
+    );
 
     await session.commitTransaction();
     session.endSession();
@@ -88,56 +99,77 @@ router.post('/order', async (req, res) => {
   }
 });
 
-// Verify payment and update service status
+// Verify payment and update records
 router.post('/verify', async (req, res) => {
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+  
   const session = await mongoose.startSession();
   session.startTransaction();
   
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-    
-    // Verify the payment signature
+    // Verify payment with Razorpay
     const crypto = require('crypto');
-    const expectedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(razorpay_order_id + '|' + razorpay_payment_id)
-      .digest('hex');
+    const hmac = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET);
+    hmac.update(razorpay_order_id + '|' + razorpay_payment_id);
+    const generated_signature = hmac.digest('hex');
 
-    if (expectedSignature !== razorpay_signature) {
+    if (generated_signature !== razorpay_signature) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ error: 'Invalid payment signature' });
     }
 
-    // Update payment record
-    const payment = await Payment.findOneAndUpdate(
-      { razorpayOrderId: razorpay_order_id },
+    // Find payment record using repository
+    const payment = await paymentRepository.findOne(
       {
-        razorpayPaymentId: razorpay_payment_id,
-        razorpaySignature: razorpay_signature,
-        status: 'successful'
+        razorpayOrderId: razorpay_order_id,
+        status: 'initiated'
       },
-      { new: true, session }
+      [],
+      { session }
     );
 
     if (!payment) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ error: 'Payment record not found' });
+      return res.status(400).json({ error: 'Invalid payment request' });
     }
 
-    // Update service payment status
-    const service = await Service.findOneAndUpdate(
-      { _id: payment.serviceId },
-      { paymentStatus: 'paid' },
-      { new: true, session }
+    // Update payment record using repository
+    await paymentRepository.update(
+      payment._id,
+      {
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        status: 'successful'
+      },
+      { session }
     );
 
-    // Update complaint status to submitted
-    await Complaint.findByIdAndUpdate(
+    // Get service to update complaint status
+    const service = await serviceRepository.findOne(
+      { _id: payment.serviceId },
+      [],
+      { session }
+    );
+
+    if (!service) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ error: 'Service not found' });
+    }
+
+    // Update service payment status using repository
+    await serviceRepository.updatePaymentStatus(
+      service._id,
+      'paid',
+      payment._id
+    );
+
+    // Update complaint status using repository
+    await complaintRepository.updateComplaintStatus(
       service.complaintId,
-      { status: 'submitted' },
-      { new: true, session }
+      'payment_received'
     );
 
     await session.commitTransaction();
@@ -154,8 +186,8 @@ router.post('/verify', async (req, res) => {
     
     // Update payment status to failed
     if (razorpay_order_id) {
-      await Payment.findOneAndUpdate(
-        { razorpayOrderId: razorpay_order_id },
+      await paymentRepository.update(
+        razorpay_order_id,
         { status: 'failed' }
       );
     }
@@ -168,32 +200,33 @@ router.post('/verify', async (req, res) => {
   }
 });
 
-// Get payment details for a complaint
+// Get payment status for a complaint
 router.get('/:complaintId', async (req, res) => {
   try {
-    const service = await Service.findOne({
-      complaintId: req.params.complaintId
-    }).populate('paymentId', 'status amount razorpayOrderId createdAt');
+    // Find service with populated payment using repository
+    const service = await serviceRepository.findOne(
+      { complaintId: req.params.complaintId },
+      ['paymentId']
+    );
 
     if (!service) {
       return res.status(404).json({ error: 'Service not found' });
     }
 
-    if (!service.paymentId) {
-      return res.status(404).json({ error: 'No payment found for this service' });
+    // Get payment details using repository if payment exists
+    let payment = null;
+    if (service.paymentId) {
+      payment = await paymentRepository.findById(service.paymentId._id);
     }
 
     res.json({
       paymentStatus: service.paymentStatus,
-      payment: service.paymentId
+      payment: payment
     });
-  } catch (err) {
-    console.error('Error fetching payment details:', err);
-    res.status(500).json({ 
-      error: 'Failed to fetch payment details', 
-      details: err.message 
-    });
+  } catch (error) {
+    console.error('Error fetching payment status:', error);
+    res.status(500).json({ error: 'Failed to fetch payment status' });
   }
-});
+});    
 
 module.exports = router;

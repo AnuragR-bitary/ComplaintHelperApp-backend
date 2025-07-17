@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const Complaint = require('../models/complaint');
-const Service = require('../models/service');
-const Payment = require('../models/payment');
 const mongoose = require('mongoose');
+const complaintRepository = require('../repositories/complaint.repository');
+const serviceRepository = require('../repositories/service.repository');
+const paymentRepository = require('../repositories/payment.repository');
 
 // Create a new complaint with initial service
 router.post('/', async (req, res) => {
@@ -27,22 +27,26 @@ router.post('/', async (req, res) => {
       manage_full: 1500  // 1500 INR for full management
     };
 
-    // Create complaint
-    const complaint = new Complaint({
-      userId: new mongoose.Types.ObjectId(userId),
-      originalText,
-      status: 'draft'
-    });
-    await complaint.save({ session });
+    // Create complaint using repository
+    const complaint = await complaintRepository.create(
+      {
+        userId: new mongoose.Types.ObjectId(userId),
+        originalText,
+        status: 'draft'
+      },
+      { session }
+    );
 
-    // Create initial service for the complaint
-    const service = new Service({
-      complaintId: complaint._id,
-      type: serviceType,
-      price: servicePrices[serviceType] || 0,
-      paymentStatus: 'unpaid'
-    });
-    await service.save({ session });
+    // Create initial service for the complaint using repository
+    const service = await serviceRepository.create(
+      {
+        complaintId: complaint._id,
+        type: serviceType,
+        price: servicePrices[serviceType] || 0,
+        paymentStatus: 'unpaid'
+      },
+      { session }
+    );
 
     await session.commitTransaction();
     session.endSession();
