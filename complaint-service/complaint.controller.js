@@ -6,6 +6,7 @@ const serviceRepository = require('../repositories/service.repository');
 const paymentRepository = require('../repositories/payment.repository');
 
 // Create a new complaint with initial service
+const { paraphraseWithOpenRouter } = require('../utils/openrouter');
 router.post('/', async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -27,11 +28,23 @@ router.post('/', async (req, res) => {
       manage_full: 1500  // 1500 INR for full management
     };
 
+    // Paraphrase originalText using OpenRouter before saving
+    let paraphrasedText = '';
+    try {
+      paraphrasedText = await paraphraseWithOpenRouter(originalText);
+    } catch (apiErr) {
+      // Optionally, you can choose to fail or continue with empty paraphrasedText
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(502).json({ error: 'Failed to paraphrase with OpenRouter', details: apiErr.message });
+    }
+
     // Create complaint using repository
     const complaint = await complaintRepository.create(
       {
         userId: new mongoose.Types.ObjectId(userId),
         originalText,
+        paraphrasedText,
         status: 'draft'
       },
       { session }
@@ -53,7 +66,7 @@ router.post('/', async (req, res) => {
 
     res.status(201).json({
       complaint,
-      service
+      service,
     });
   } catch (err) {
     await session.abortTransaction();

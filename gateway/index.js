@@ -5,6 +5,8 @@ const mongoose = require("mongoose");
 const { decodeAndVerifyJWT } = require("../utils/jwt");
 const complaintRouter = require("../complaint-service/complaint.controller");
 const paymentRouter = require("../payment-service/payment.controller");
+const userRouter = require("../user-service/user.controller");
+const serviceRouter = require("../service-service/service.controller");
 
 const app = express();
 app.use(cors());
@@ -21,23 +23,28 @@ mongoose
 
 app.post("/api/test-login", (req, res) => {
   const testUser = {
-    id: "test-user-123",
+    id: "507f1f77bcf86cd799439011",
     email: "test@example.com",
+    firstName: "Test",
+    lastName: "User",
     roles: ["user"],
   };
   // In a real app, generate a proper JWT token here
   res.json({
-    token: "test-token-123",
+    token: "507f1f77bcf86cd799439011",
     user: testUser,
   });
+  
 });
 // JWT Middleware
 app.use(async (req, res, next) => {
   const authHeader = req.headers["authorization"];
-  if (authHeader === 'Bearer test-token-123') {
+  if (authHeader === 'Bearer 507f1f77bcf86cd799439011') {
     req.user = {
-      id: 'test-user-123',
+      id: '507f1f77bcf86cd799439011',
       email: 'test@example.com',
+      firstName: 'Test',
+      lastName: 'User',
       roles: ['user']
     };
     return next();
@@ -51,9 +58,11 @@ app.use(async (req, res, next) => {
   try {
     const payload = await decodeAndVerifyJWT(token);
     req.user = {
-      id: payload.sub,
+      id: payload.sub || payload.id,
       email: payload.email,
-      roles: payload.realm_access?.roles || [],
+      firstName: payload.firstName || payload.given_name || '',
+      lastName: payload.lastName || payload.family_name || '',
+      roles: payload.realm_access ? payload.realm_access.roles : [],
     };
     next();
   } catch (err) {
@@ -67,6 +76,9 @@ app.use(async (req, res, next) => {
 // Route requests to microservices
 app.use("/api/complaints", complaintRouter);
 app.use("/api/payments", paymentRouter);
+app.use("/api/users", userRouter);
+app.use("/api/services", serviceRouter);
+
 
 app.get("/api/ping", (req, res) => res.json({ status: "ok", user: req.user }));
 

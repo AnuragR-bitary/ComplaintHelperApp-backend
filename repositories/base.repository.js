@@ -5,7 +5,8 @@ class BaseRepository {
   }
 
   async create(data, options = {}) {
-    return this.model.create([data], options)[0];
+    const docs = await this.model.create([data], options);
+    return docs[0];
   }
 
   async findById(id, populate = [], options = {}) {
@@ -13,7 +14,7 @@ class BaseRepository {
     populate.forEach((field) => {
       query = query.populate(field);
     });
-    return query.exec();
+    return await query.exec();
   }
 
   async findOne(conditions, populate = [], options = {}) {
@@ -21,7 +22,7 @@ class BaseRepository {
     populate.forEach((field) => {
       query = query.populate(field);
     });
-    return query.exec();
+    return await query.exec();
   }
 
   async find(conditions = {}, populate = [], sort = { createdAt: -1 }, options = {}) {
@@ -29,11 +30,11 @@ class BaseRepository {
     populate.forEach((field) => {
       query = query.populate(field);
     });
-    return query.exec();
+    return await query.exec();
   }
 
   async update(id, data, options = {}) {
-    return this.model
+    return await this.model
       .findByIdAndUpdate(
         id,
         { $set: { ...data, updatedAt: new Date() } },
@@ -44,14 +45,14 @@ class BaseRepository {
   }
 
   async delete(id, options = {}) {
-    return this.model
+    return await this.model
       .findByIdAndDelete(id)
       .session(options.session || null)
       .exec();
   }
 
   async count(conditions = {}, options = {}) {
-    return this.model
+    return await this.model
       .countDocuments(conditions)
       .session(options.session || null)
       .exec();

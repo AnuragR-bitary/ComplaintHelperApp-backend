@@ -15,13 +15,22 @@ class UserRepository extends BaseRepository {
     return this.findOne({ email: email.toLowerCase() }, populate);
   }
 
-  async findOrCreate(keycloakId, email) {
+  /**
+   * Finds a user by keycloakId or creates a new one with provided details.
+   * @param {string} keycloakId
+   * @param {string} email
+   * @param {string} [firstName]
+   * @param {string} [lastName]
+   */
+  async findOrCreate(keycloakId, email, firstName = '', lastName = '') {
     let user = await this.findByKeycloakId(keycloakId);
     
     if (!user) {
       user = await this.create({
         keycloakId,
-        email: email.toLowerCase()
+        email: email.toLowerCase(),
+        firstName,
+        lastName
       });
     }
     
