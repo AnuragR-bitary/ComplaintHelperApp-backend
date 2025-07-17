@@ -1,0 +1,22 @@
+{
+  "name": "complaint-helper-backend",
+  "version": "1.0.0",
+  "description": "Backend for Complaint Helper App (API Gateway + Microservices)",
+  "main": "gateway/index.js",
+  "scripts": {
+    "start": "node gateway/index.js",
+    "dev": "nodemon gateway/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^7.5.0",
+    "jose": "^5.0.0",
+    "axios": "^1.6.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "razorpay": "^2.8.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
