@@ -1,42 +1,48 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const mongoose = require('mongoose');
-const complaintRepository = require('../repositories/complaint.repository');
-const serviceRepository = require('../repositories/service.repository');
-const paymentRepository = require('../repositories/payment.repository');
+const mongoose = require("mongoose");
+const complaintRepository = require("../repositories/complaint.repository");
+const serviceRepository = require("../repositories/service.repository");
+const paymentRepository = require("../repositories/payment.repository");
+const Complaint = require('../models/complaint');
 
 // Create a new complaint with initial service
-const { paraphraseWithOpenRouter } = require('../utils/openrouter');
-router.post('/', async (req, res) => {
+const { paraphraseWithOpenRouter } = require("../utils/openrouter");
+router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
-    const { originalText, serviceType = 'email' } = req.body;
+    const { originalText, serviceType = "email" } = req.body;
     const userId = req.user.id;
 
     // Validate service type
-    if (!['email', 'manage_full'].includes(serviceType)) {
+    if (!["email", "manage_full"].includes(serviceType)) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ error: 'Invalid service type' });
+      return res.status(400).json({ error: "Invalid service type" });
     }
 
     // Set price based on service type (example prices)
     const servicePrices = {
-      email: 500,    // 500 INR for email service
-      manage_full: 1500  // 1500 INR for full management
+      email: 500, // 500 INR for email service
+      manage_full: 1500, // 1500 INR for full management
     };
 
     // Paraphrase originalText using OpenRouter before saving
-    let paraphrasedText = '';
+    let paraphrasedText = "";
     try {
       paraphrasedText = await paraphraseWithOpenRouter(originalText);
     } catch (apiErr) {
       // Optionally, you can choose to fail or continue with empty paraphrasedText
       await session.abortTransaction();
       session.endSession();
-      return res.status(502).json({ error: 'Failed to paraphrase with OpenRouter', details: apiErr.message });
+      return res
+        .status(502)
+        .json({
+          error: "Failed to paraphrase with OpenRouter",
+          details: apiErr.message,
+        });
     }
 
     // Create complaint using repository
@@ -45,7 +51,7 @@ router.post('/', async (req, res) => {
         userId: new mongoose.Types.ObjectId(userId),
         originalText,
         paraphrasedText,
-        status: 'draft'
+        status: "draft",
       },
       { session }
     );
@@ -56,7 +62,7 @@ router.post('/', async (req, res) => {
         complaintId: complaint._id,
         type: serviceType,
         price: servicePrices[serviceType] || 0,
-        paymentStatus: 'unpaid'
+        paymentStatus: "unpaid",
       },
       { session }
     );
@@ -71,38 +77,38 @@ router.post('/', async (req, res) => {
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
-    console.error('Error creating complaint:', err);
-    res.status(500).json({ 
-      error: 'Failed to create complaint', 
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined 
+    console.error("Error creating complaint:", err);
+    res.status(500).json({
+      error: "Failed to create complaint",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 });
 
 // Get all complaints for the authenticated user with service and payment info
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const complaints = await Complaint.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(req.user.id) } },
       { $sort: { createdAt: -1 } },
       {
         $lookup: {
-          from: 'services',
-          localField: '_id',
-          foreignField: 'complaintId',
-          as: 'service'
-        }
+          from: "services",
+          localField: "_id",
+          foreignField: "complaintId",
+          as: "service",
+        },
       },
-      { $unwind: { path: '$service', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: "$service", preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
-          from: 'payments',
-          localField: 'service.paymentId',
-          foreignField: '_id',
-          as: 'payment'
-        }
+          from: "payments",
+          localField: "service.paymentId",
+          foreignField: "_id",
+          as: "payment",
+        },
       },
-      { $unwind: { path: '$payment', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: "$payment", preserveNullAndEmptyArrays: true } },
       {
         $project: {
           _id: 1,
@@ -113,59 +119,59 @@ router.get('/', async (req, res) => {
           createdAt: 1,
           updatedAt: 1,
           service: {
-            _id: '$service._id',
-            type: '$service.type',
-            price: '$service.price',
-            paymentStatus: '$service.paymentStatus'
+            _id: "$service._id",
+            type: "$service.type",
+            price: "$service.price",
+            paymentStatus: "$service.paymentStatus",
           },
           payment: {
-            status: '$payment.status',
-            amount: '$payment.amount',
-            razorpayOrderId: '$payment.razorpayOrderId',
-            createdAt: '$payment.createdAt'
-          }
-        }
-      }
+            status: "$payment.status",
+            amount: "$payment.amount",
+            razorpayOrderId: "$payment.razorpayOrderId",
+            createdAt: "$payment.createdAt",
+          },
+        },
+      },
     ]);
-    
+
     res.json(complaints);
   } catch (err) {
-    console.error('Error fetching complaints:', err);
-    res.status(500).json({ 
-      error: 'Failed to fetch complaints', 
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined 
+    console.error("Error fetching complaints:", err);
+    res.status(500).json({
+      error: "Failed to fetch complaints",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 });
 
 // Get a single complaint with service and payment details
-router.get('/:id', async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const complaint = await Complaint.aggregate([
-      { 
-        $match: { 
+      {
+        $match: {
           _id: new mongoose.Types.ObjectId(req.params.id),
-          userId: new mongoose.Types.ObjectId(req.user.id)
-        } 
+          userId: new mongoose.Types.ObjectId(req.user.id),
+        },
       },
       {
         $lookup: {
-          from: 'services',
-          localField: '_id',
-          foreignField: 'complaintId',
-          as: 'service'
-        }
+          from: "services",
+          localField: "_id",
+          foreignField: "complaintId",
+          as: "service",
+        },
       },
-      { $unwind: { path: '$service', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: "$service", preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
-          from: 'payments',
-          localField: 'service.paymentId',
-          foreignField: '_id',
-          as: 'payment'
-        }
+          from: "payments",
+          localField: "service.paymentId",
+          foreignField: "_id",
+          as: "payment",
+        },
       },
-      { $unwind: { path: '$payment', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: "$payment", preserveNullAndEmptyArrays: true } },
       {
         $project: {
           _id: 1,
@@ -176,71 +182,71 @@ router.get('/:id', async (req, res) => {
           createdAt: 1,
           updatedAt: 1,
           service: {
-            _id: '$service._id',
-            type: '$service.type',
-            price: '$service.price',
-            paymentStatus: '$service.paymentStatus',
-            formSubmitted: '$service.formSubmitted'
+            _id: "$service._id",
+            type: "$service.type",
+            price: "$service.price",
+            paymentStatus: "$service.paymentStatus",
+            formSubmitted: "$service.formSubmitted",
           },
           payment: {
-            _id: '$payment._id',
-            status: '$payment.status',
-            amount: '$payment.amount',
-            razorpayOrderId: '$payment.razorpayOrderId',
-            razorpayPaymentId: '$payment.razorpayPaymentId',
-            createdAt: '$payment.createdAt',
-            updatedAt: '$payment.updatedAt'
-          }
-        }
-      }
+            _id: "$payment._id",
+            status: "$payment.status",
+            amount: "$payment.amount",
+            razorpayOrderId: "$payment.razorpayOrderId",
+            razorpayPaymentId: "$payment.razorpayPaymentId",
+            createdAt: "$payment.createdAt",
+            updatedAt: "$payment.updatedAt",
+          },
+        },
+      },
     ]);
 
     if (!complaint || complaint.length === 0) {
-      return res.status(404).json({ error: 'Complaint not found' });
+      return res.status(404).json({ error: "Complaint not found" });
     }
-    
+
     res.json(complaint[0]);
   } catch (err) {
-    console.error('Error fetching complaint:', err);
-    res.status(500).json({ 
-      error: 'Failed to fetch complaint', 
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined 
+    console.error("Error fetching complaint:", err);
+    res.status(500).json({
+      error: "Failed to fetch complaint",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 });
 
 // Update complaint text (only allowed in draft status)
-router.put('/:id/text', async (req, res) => {
+router.put("/:id/text", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
     const { originalText } = req.body;
-    
+
     const complaint = await Complaint.findOneAndUpdate(
-      { 
-        _id: req.params.id, 
-        userId: req.user.id, 
-        status: 'draft' 
+      {
+        _id: req.params.id,
+        userId: req.user.id,
+        status: "draft",
       },
-      { 
-        $set: { 
+      {
+        $set: {
           originalText,
-          updatedAt: new Date()
-        } 
+          updatedAt: new Date(),
+        },
       },
-      { 
-        new: true, 
+      {
+        new: true,
         runValidators: true,
-        session 
+        session,
       }
     );
 
     if (!complaint) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ 
-        error: 'Complaint not found, not owned by user, or not in draft status' 
+      return res.status(404).json({
+        error: "Complaint not found, not owned by user, or not in draft status",
       });
     }
 
@@ -251,66 +257,69 @@ router.put('/:id/text', async (req, res) => {
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
-    console.error('Error updating complaint text:', err);
-    res.status(500).json({ 
-      error: 'Failed to update complaint', 
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined 
+    console.error("Error updating complaint text:", err);
+    res.status(500).json({
+      error: "Failed to update complaint",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 });
 
 // Update paraphrased text and approval status
-router.put('/:id/paraphrase', async (req, res) => {
+router.put("/:id/paraphrase", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
     const { paraphrasedText, isApproved = false } = req.body;
-    
+
     // Validate input
     if (isApproved && !paraphrasedText) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ error: 'Paraphrased text is required for approval' });
+      return res
+        .status(400)
+        .json({ error: "Paraphrased text is required for approval" });
     }
 
     const update = {
       $set: {
-        updatedAt: new Date()
-      }
+        updatedAt: new Date(),
+      },
     };
 
     // Only update paraphrasedText if provided
     if (paraphrasedText !== undefined) {
       update.$set.paraphrasedText = paraphrasedText;
       update.$set.isParaphraseApproved = isApproved;
-      
+
       // Update status based on approval
       if (isApproved) {
-        update.$set.status = 'pending_payment';
+        update.$set.status = "pending_payment";
       }
     }
 
     const complaint = await Complaint.findOneAndUpdate(
-      { 
-        _id: req.params.id, 
+      {
+        _id: req.params.id,
         userId: req.user.id,
         // Only allow updates to draft or pending_payment complaints
-        status: { $in: ['draft', 'pending_payment'] } 
+        status: { $in: ["draft", "pending_payment"] },
       },
       update,
-      { 
-        new: true, 
+      {
+        new: true,
         runValidators: true,
-        session 
+        session,
       }
     );
 
     if (!complaint) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ 
-        error: 'Complaint not found, not owned by user, or not in an editable state' 
+      return res.status(404).json({
+        error:
+          "Complaint not found, not owned by user, or not in an editable state",
       });
     }
 
@@ -321,72 +330,73 @@ router.put('/:id/paraphrase', async (req, res) => {
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
-    console.error('Error updating paraphrase:', err);
-    res.status(500).json({ 
-      error: 'Failed to update paraphrase', 
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined 
+    console.error("Error updating paraphrase:", err);
+    res.status(500).json({
+      error: "Failed to update paraphrase",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 });
 
 // Submit service form (after payment)
-router.post('/:id/submit-form', async (req, res) => {
+router.post("/:id/submit-form", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
     const { formData } = req.body;
-    
+
     // Verify complaint exists and belongs to user
     const complaint = await Complaint.findOne({
       _id: req.params.id,
       userId: req.user.id,
-      status: 'submitted' // Only allow form submission after payment
+      status: "submitted", // Only allow form submission after payment
     }).session(session);
 
     if (!complaint) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ 
-        error: 'Complaint not found, not owned by user, or not in submitted status' 
+      return res.status(404).json({
+        error:
+          "Complaint not found, not owned by user, or not in submitted status",
       });
     }
 
     // Update service with form submission
     const service = await Service.findOneAndUpdate(
-      { 
+      {
         complaintId: complaint._id,
-        paymentStatus: 'paid' // Only allow form submission if paid
+        paymentStatus: "paid", // Only allow form submission if paid
       },
-      { 
-        $set: { 
+      {
+        $set: {
           formSubmitted: true,
           formData: formData,
-          updatedAt: new Date()
-        } 
+          updatedAt: new Date(),
+        },
       },
-      { 
+      {
         new: true,
-        session 
+        session,
       }
     );
 
     if (!service) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ 
-        error: 'No paid service found for this complaint' 
+      return res.status(400).json({
+        error: "No paid service found for this complaint",
       });
     }
 
     // Update complaint status to in_progress
     await Complaint.findByIdAndUpdate(
       complaint._id,
-      { 
-        $set: { 
-          status: 'in_progress',
-          updatedAt: new Date()
-        } 
+      {
+        $set: {
+          status: "in_progress",
+          updatedAt: new Date(),
+        },
       },
       { session }
     );
@@ -394,66 +404,175 @@ router.post('/:id/submit-form', async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    res.json({ 
-      success: true, 
-      message: 'Form submitted successfully' 
+    res.json({
+      success: true,
+      message: "Form submitted successfully",
     });
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
-    console.error('Error submitting form:', err);
-    res.status(500).json({ 
-      error: 'Failed to submit form', 
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined 
+    console.error("Error submitting form:", err);
+    res.status(500).json({
+      error: "Failed to submit form",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 });
-  router.post('/:id/paraphrase/retry', async (req, res) => {
+
+/**
+ * @route POST /api/complaints/paraphrase
+ * @desc Generate a new paraphrase for a complaint
+ */
+router.post("/paraphrase", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const complaint = await Complaint.findOne({
-      _id: req.params.id,
-      userId: req.user.id,
-      status: 'draft'
-    }).session(session);
+    const { complaintId } = req.body;
+    
+    // Get the complaint
+    const complaint = await complaintRepository.findByIdAndUserId(
+      complaintId,
+      req.user.id,
+      { session }
+    );
 
     if (!complaint) {
       await session.abortTransaction();
       session.endSession();
       return res.status(404).json({
-        error: 'Complaint not found or not in editable state'
+        error: "Complaint not found or not accessible",
       });
     }
 
-    // Re-paraphrase using OpenRouter
+    // Only allow paraphrasing for drafts or when in review
+    if (!['draft', 'in_review'].includes(complaint.status)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        error: "Cannot paraphrase a complaint that is not in draft or review status",
+      });
+    }
+
+    // Generate new paraphrase
     const newParaphrasedText = await paraphraseWithOpenRouter(complaint.originalText);
+    
+    // Add to history
+    const { complaint: updatedComplaint, paraphraseId } = await complaintRepository.addParaphrase(
+      complaint._id,
+      newParaphrasedText,
+      { 
+        session,
+        setAsCurrent: complaint.status === 'draft' // Set as current if it's the first paraphrase
+      }
+    );
 
-    // Save to paraphrase history
-    complaint.paraphraseHistory = complaint.paraphraseHistory || [];
-    complaint.paraphraseHistory.push({ text: newParaphrasedText });
-
-    // Optionally, update current paraphrasedText as well
-    complaint.paraphrasedText = newParaphrasedText;
-    complaint.updatedAt = new Date();
-
-    await complaint.save({ session });
+    // If this is the first paraphrase, update status to in_review
+    if (complaint.status === 'draft') {
+      await complaintRepository.update(
+        complaint._id,
+        { status: 'in_review' },
+        { session }
+      );
+    }
 
     await session.commitTransaction();
     session.endSession();
 
     res.json({
+      success: true,
+      paraphraseId,
       paraphrasedText: newParaphrasedText,
-      message: 'New paraphrased version generated'
+      message: "New paraphrase generated successfully"
     });
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
-    console.error('Error re-paraphrasing complaint:', err);
+    console.error("Error generating paraphrase:", err);
     res.status(500).json({
-      error: 'Failed to re-paraphrase complaint',
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: "Failed to generate paraphrase",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+    });
+  }
+});
+
+/**
+ * @route POST /api/complaints/paraphrase/respond
+ * @desc Accept or reject a paraphrase
+ */
+router.post("/paraphrase/respond", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { complaintId, paraphraseId, action, feedback = '' } = req.body;
+    
+    if (!['accept', 'reject'].includes(action)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        error: "Invalid action. Must be 'accept' or 'reject'"
+      });
+    }
+
+    // Get the complaint
+    const complaint = await complaintRepository.findByIdAndUserId(
+      complaintId,
+      req.user.id,
+      { session }
+    );
+
+    if (!complaint) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        error: "Complaint not found or not accessible",
+      });
+    }
+
+    // Only allow responding to paraphrases when in review
+    if (complaint.status !== 'in_review') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        error: "Can only respond to paraphrases when complaint is in review status",
+      });
+    }
+
+    // Update the paraphrase status
+    const status = action === 'accept' ? 'accepted' : 'rejected';
+    const updatedComplaint = await complaintRepository.updateParaphraseStatus(
+      complaintId,
+      paraphraseId,
+      status,
+      feedback,
+      { session }
+    );
+
+    // If accepted, update the complaint status to pending_payment
+    if (action === 'accept') {
+      await complaintRepository.update(
+        complaintId,
+        { status: 'pending_payment' },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({
+      success: true,
+      message: `Paraphrase ${status} successfully`,
+      currentParaphrase: updatedComplaint.currentParaphrase
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error responding to paraphrase:", err);
+    res.status(500).json({
+      error: `Failed to ${action} paraphrase`,
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 });
