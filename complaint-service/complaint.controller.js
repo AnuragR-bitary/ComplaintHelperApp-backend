@@ -88,51 +88,19 @@ router.post("/", async (req, res) => {
 // Get all complaints for the authenticated user with service and payment info
 router.get("/", async (req, res) => {
   try {
-    const complaints = await Complaint.aggregate([
-      { $match: { userId: new mongoose.Types.ObjectId(req.user.id) } },
-      { $sort: { createdAt: -1 } },
+    const complaints = await Complaint.find(
+      { userId: new mongoose.Types.ObjectId(req.user.id) },
       {
-        $lookup: {
-          from: "services",
-          localField: "_id",
-          foreignField: "complaintId",
-          as: "service",
-        },
-      },
-      { $unwind: { path: "$service", preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: "payments",
-          localField: "service.paymentId",
-          foreignField: "_id",
-          as: "payment",
-        },
-      },
-      { $unwind: { path: "$payment", preserveNullAndEmptyArrays: true } },
-      {
-        $project: {
-          _id: 1,
-          originalText: 1,
-          paraphrasedText: 1,
-          isParaphraseApproved: 1,
-          status: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          service: {
-            _id: "$service._id",
-            type: "$service.type",
-            price: "$service.price",
-            paymentStatus: "$service.paymentStatus",
-          },
-          payment: {
-            status: "$payment.status",
-            amount: "$payment.amount",
-            razorpayOrderId: "$payment.razorpayOrderId",
-            createdAt: "$payment.createdAt",
-          },
-        },
-      },
-    ]);
+        userId: 1,
+        originalText: 1,
+        paraphrasedText: 1,
+        isParaphraseApproved: 1,
+        status: 1,
+        paraphraseHistory: 1,
+        createdAt: 1,
+        __v: 1
+      }
+    ).sort({ createdAt: -1 });
 
     res.json(complaints);
   } catch (err) {
@@ -144,68 +112,19 @@ router.get("/", async (req, res) => {
   }
 });
 
-// Get a single complaint with service and payment details
+// Get a single complaint
 router.get("/:id", async (req, res) => {
   try {
-    const complaint = await Complaint.aggregate([
-      {
-        $match: {
-          _id: new mongoose.Types.ObjectId(req.params.id),
-          userId: new mongoose.Types.ObjectId(req.user.id),
-        },
-      },
-      {
-        $lookup: {
-          from: "services",
-          localField: "_id",
-          foreignField: "complaintId",
-          as: "service",
-        },
-      },
-      { $unwind: { path: "$service", preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: "payments",
-          localField: "service.paymentId",
-          foreignField: "_id",
-          as: "payment",
-        },
-      },
-      { $unwind: { path: "$payment", preserveNullAndEmptyArrays: true } },
-      {
-        $project: {
-          _id: 1,
-          originalText: 1,
-          paraphrasedText: 1,
-          isParaphraseApproved: 1,
-          status: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          service: {
-            _id: "$service._id",
-            type: "$service.type",
-            price: "$service.price",
-            paymentStatus: "$service.paymentStatus",
-            formSubmitted: "$service.formSubmitted",
-          },
-          payment: {
-            _id: "$payment._id",
-            status: "$payment.status",
-            amount: "$payment.amount",
-            razorpayOrderId: "$payment.razorpayOrderId",
-            razorpayPaymentId: "$payment.razorpayPaymentId",
-            createdAt: "$payment.createdAt",
-            updatedAt: "$payment.updatedAt",
-          },
-        },
-      },
-    ]);
+    const complaint = await Complaint.findOne({
+      _id: new mongoose.Types.ObjectId(req.params.id),
+      userId: new mongoose.Types.ObjectId(req.user.id)
+    });
 
-    if (!complaint || complaint.length === 0) {
+    if (!complaint) {
       return res.status(404).json({ error: "Complaint not found" });
     }
 
-    res.json(complaint[0]);
+    res.json(complaint);
   } catch (err) {
     console.error("Error fetching complaint:", err);
     res.status(500).json({
