@@ -7,10 +7,13 @@ const complaintRouter = require("../complaint-service/complaint.controller");
 const paymentRouter = require("../payment-service/payment.controller");
 const userRouter = require("../user-service/user.controller");
 const serviceRouter = require("../service-service/service.controller");
+const requestLogger = require('./middlewares/requestLogger');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+//for maintaining logs 
+app.use(requestLogger);
 
 // Connect to MongoDB
 mongoose
