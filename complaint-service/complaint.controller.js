@@ -408,5 +408,54 @@ router.post('/:id/submit-form', async (req, res) => {
     });
   }
 });
+  router.post('/:id/paraphrase/retry', async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const complaint = await Complaint.findOne({
+      _id: req.params.id,
+      userId: req.user.id,
+      status: 'draft'
+    }).session(session);
+
+    if (!complaint) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        error: 'Complaint not found or not in editable state'
+      });
+    }
+
+    // Re-paraphrase using OpenRouter
+    const newParaphrasedText = await paraphraseWithOpenRouter(complaint.originalText);
+
+    // Save to paraphrase history
+    complaint.paraphraseHistory = complaint.paraphraseHistory || [];
+    complaint.paraphraseHistory.push({ text: newParaphrasedText });
+
+    // Optionally, update current paraphrasedText as well
+    complaint.paraphrasedText = newParaphrasedText;
+    complaint.updatedAt = new Date();
+
+    await complaint.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({
+      paraphrasedText: newParaphrasedText,
+      message: 'New paraphrased version generated'
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error('Error re-paraphrasing complaint:', err);
+    res.status(500).json({
+      error: 'Failed to re-paraphrase complaint',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
 
 module.exports = router;

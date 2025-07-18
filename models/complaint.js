@@ -13,6 +13,12 @@ const complaintSchema = new mongoose.Schema({
   paraphrasedText: {
     type: String,
   },
+  paraphraseHistory: [
+  {
+    text: String,
+    createdAt: { type: Date, default: Date.now }
+  }
+],
   isParaphraseApproved: {
     type: Boolean,
     default: false,
