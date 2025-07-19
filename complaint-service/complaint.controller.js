@@ -338,6 +338,7 @@ router.post("/:id/submit-form", async (req, res) => {
   }
 });
 
+
 /**
  * @route POST /api/complaints/paraphrase
  * @desc Generate a new paraphrase for a complaint
@@ -350,11 +351,10 @@ router.post("/paraphrase", async (req, res) => {
     const { complaintId } = req.body;
     
     // Get the complaint
-    const complaint = await complaintRepository.findByIdAndUserId(
-      complaintId,
-      req.user.id,
-      { session }
-    );
+    const complaint = await Complaint.findOne({
+      _id: complaintId,
+      userId: req.user.id
+    }).session(session);
 
     if (!complaint) {
       await session.abortTransaction();
@@ -376,23 +376,34 @@ router.post("/paraphrase", async (req, res) => {
     // Generate new paraphrase
     const newParaphrasedText = await paraphraseWithOpenRouter(complaint.originalText);
     
-    // Add to history
-    const { complaint: updatedComplaint, paraphraseId } = await complaintRepository.addParaphrase(
-      complaint._id,
-      newParaphrasedText,
-      { 
-        session,
-        setAsCurrent: complaint.status === 'draft' // Set as current if it's the first paraphrase
-      }
-    );
+    // Create new paraphrase entry
+    const newParaphrase = {
+      text: newParaphrasedText,
+      status: 'pending',
+      createdAt: new Date()
+    };
 
-    // If this is the first paraphrase, update status to in_review
+    // Add to history
+    complaint.paraphraseHistory.push(newParaphrase);
+    
+    // If it's the first paraphrase, update status to in_review
     if (complaint.status === 'draft') {
-      await complaintRepository.update(
-        complaint._id,
-        { status: 'in_review' },
-        { session }
-      );
+      complaint.status = 'in_review';
+    }
+
+    // Save the complaint with the new paraphrase
+    await complaint.save({ session });
+
+    // Get the ID of the newly added paraphrase
+    const paraphraseId = complaint.paraphraseHistory[complaint.paraphraseHistory.length - 1]._id;
+
+    // Update current paraphrase reference if needed
+    if (complaint.status === 'in_review') {
+      complaint.currentParaphrase = {
+        text: newParaphrasedText,
+        paraphraseId: paraphraseId
+      };
+      await complaint.save({ session });
     }
 
     await session.commitTransaction();
@@ -402,6 +413,7 @@ router.post("/paraphrase", async (req, res) => {
       success: true,
       paraphraseId,
       paraphrasedText: newParaphrasedText,
+      status: complaint.status,  // Include the new status in response
       message: "New paraphrase generated successfully"
     });
   } catch (err) {
