@@ -1,4 +1,12 @@
+// Load environment variables first
 require("dotenv").config();
+
+// Log environment info
+console.log('=== Starting Server ===');
+console.log('NODE_ENV:', process.env.NODE_ENV || 'development');
+console.log('MongoDB URI:', process.env.MONGODB_URI ? 'Set' : 'Not set');
+console.log('Keycloak URL:', process.env.KEYCLOAK_ISSUER || 'Not set');
+
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -10,19 +18,50 @@ const serviceRouter = require("../service-service/service.controller");
 const requestLogger = require("../middleware/requestLogger");
 
 const app = express();
-app.use(cors());
+// Configure CORS with credentials support
+const corsOptions = {
+  origin: 'http://localhost:8100', // Your frontend URL
+  credentials: true, // Allow credentials (cookies, authorization headers)
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range']
+};
+
+// Enable CORS with the above options
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
 app.use(express.json());
+
 //for maintaining logs 
 app.use(requestLogger);
 
-// Connect to MongoDB
-mongoose
-  .connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => console.error("MongoDB connection error:", err));
+// Connect to MongoDB with enhanced logging
+console.log('Attempting to connect to MongoDB...');
+console.log('MongoDB URI:', process.env.MONGODB_URI);
+
+const connectDB = async () => {
+  try {
+    const conn = await mongoose.connect(process.env.MONGODB_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    
+    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    console.log(`Database Name: ${conn.connection.name}`);
+    
+    // Log all collections in the database
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    console.log('Available collections:', collections.map(c => c.name));
+    
+  } catch (err) {
+    console.error('MongoDB connection error:', err.message);
+    process.exit(1);
+  }
+};
+
+connectDB();
 
 app.post("/api/test-login", (req, res) => {
   const testUser = {
@@ -60,13 +99,32 @@ app.use(async (req, res, next) => {
   const token = authHeader.split(" ")[1];
   try {
     const payload = await decodeAndVerifyJWT(token);
+    console.log('JWT Payload:', JSON.stringify(payload, null, 2));
+    
+    // Ensure we have the required fields from the JWT payload
+    if (!payload.sub) {
+      console.error('JWT payload missing required field: sub');
+      return res.status(401).json({ error: 'Invalid token: missing subject' });
+    }
+    
+    if (!payload.email) {
+      console.error('JWT payload missing required field: email');
+      return res.status(401).json({ error: 'Invalid token: missing email' });
+    }
+    
+    // Create user object with all necessary fields
     req.user = {
-      id: payload.sub || payload.id,
+      id: payload.sub,  // Use sub as the Keycloak user ID
+      keycloakId: payload.sub,  // Also store as keycloakId for compatibility
       email: payload.email,
-      firstName: payload.firstName || payload.given_name || '',
-      lastName: payload.lastName || payload.family_name || '',
-      roles: payload.realm_access ? payload.realm_access.roles : [],
+      firstName: payload.given_name || payload.firstName || '',
+      lastName: payload.family_name || payload.lastName || '',
+      roles: payload.realm_access?.roles || [],
+      // Include any other fields you might need
+      ...payload
     };
+    
+    console.log('Formatted user object:', JSON.stringify(req.user, null, 2));
     next();
   } catch (err) {
     return res.status(401).json({ 
@@ -75,6 +133,10 @@ app.use(async (req, res, next) => {
     });
   }
 });
+
+// User sync middleware (after JWT verification)
+const syncUserFromJWT = require('../middleware/userSync');
+app.use(syncUserFromJWT);
 
 // Route requests to microservices
 app.use("/api/complaints", complaintRouter);

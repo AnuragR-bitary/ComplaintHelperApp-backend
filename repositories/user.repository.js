@@ -16,6 +16,19 @@ class UserRepository extends BaseRepository {
   }
 
   /**
+   * Updates a user by keycloakId
+   * @param {string} keycloakId
+   * @param {object} updateFields
+   */
+  async updateByKeycloakId(keycloakId, updateFields) {
+    return this.model.findOneAndUpdate(
+      { keycloakId },
+      { $set: updateFields },
+      { new: true }
+    );
+  }
+
+  /**
    * Finds a user by keycloakId or creates a new one with provided details.
    * @param {string} keycloakId
    * @param {string} email

@@ -26,9 +26,20 @@ const paraphraseEntrySchema = new mongoose.Schema({
 
 const complaintSchema = new mongoose.Schema({
   userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: String, // Changed from ObjectId to String to accept UUID
     required: true,
+    // Add a custom setter to handle both UUID and ObjectId
+    set: function(value) {
+      // If it's already a string (like a UUID), use it as is
+      if (typeof value === 'string') {
+        return value;
+      }
+      // If it's an ObjectId, convert to string
+      if (value && value.toString) {
+        return value.toString();
+      }
+      return value;
+    }
   },
   originalText: {
     type: String,

@@ -48,7 +48,7 @@ router.post("/", async (req, res) => {
     // Create complaint using repository
     const complaint = await complaintRepository.create(
       {
-        userId: new mongoose.Types.ObjectId(userId),
+        userId: userId, // Use the userId as is (string/UUID)
         originalText,
         paraphrasedText,
         status: "draft",
@@ -89,7 +89,7 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const complaints = await Complaint.find(
-      { userId: new mongoose.Types.ObjectId(req.user.id) },
+      { userId: req.user.id },
       {
         userId: 1,
         originalText: 1,
@@ -116,8 +116,8 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const complaint = await Complaint.findOne({
-      _id: new mongoose.Types.ObjectId(req.params.id),
-      userId: new mongoose.Types.ObjectId(req.user.id)
+      _id: req.params.id,
+      userId: req.user.id
     });
 
     if (!complaint) {
