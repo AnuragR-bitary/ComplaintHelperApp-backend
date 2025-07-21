@@ -29,28 +29,13 @@ router.post("/", async (req, res) => {
       manage_full: 1500, // 1500 INR for full management
     };
 
-    // Paraphrase originalText using OpenRouter before saving
-    let paraphrasedText = "";
-    try {
-      paraphrasedText = await paraphraseWithOpenRouter(originalText);
-    } catch (apiErr) {
-      // Optionally, you can choose to fail or continue with empty paraphrasedText
-      await session.abortTransaction();
-      session.endSession();
-      return res
-        .status(502)
-        .json({
-          error: "Failed to paraphrase with OpenRouter",
-          details: apiErr.message,
-        });
-    }
-
-    // Create complaint using repository
+    // Create complaint with just the original text
+    // Paraphrase will be generated on-demand when requested
     const complaint = await complaintRepository.create(
       {
-        userId: userId, // Use the userId as is (string/UUID)
+        userId: userId,
         originalText,
-        paraphrasedText,
+        paraphrasedText: "", // Will be generated on first paraphrase request
         status: "draft",
       },
       { session }
@@ -376,8 +361,8 @@ router.post("/paraphrase", async (req, res) => {
     // Generate new paraphrase
     const newParaphrasedText = await paraphraseWithOpenRouter(complaint.originalText);
     
-    // Add to history
-    const { complaint: updatedComplaint, paraphraseId } = await complaintRepository.addParaphrase(
+    // Add to history and get the paraphrase ID
+    const { paraphraseId } = await complaintRepository.addParaphrase(
       complaint._id,
       newParaphrasedText,
       { 
